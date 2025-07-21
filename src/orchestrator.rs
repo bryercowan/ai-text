@@ -106,12 +106,12 @@ impl BotOrchestrator {
                     continue;
                 }
 
-                // // Skip messages from us
-                // if message.is_from_me == Some(true) {
-                //     self.processed_messages.insert(message.guid);
-                //     continue;
-                // }
-
+                // Skip messages from us
+                if message.is_from_me == Some(true) {
+                    self.processed_messages.insert(message.guid);
+                    continue;
+                }
+                //
                 // Skip messages older than startup time
                 let message_time =
                     message.date_created.or(message.date_delivered).unwrap_or(0) as u64;
@@ -135,17 +135,8 @@ impl BotOrchestrator {
 
                 debug!("Processing message from chat {}: '{}'", chat.guid, text);
 
-                // Check if message contains any trigger
-                let lower_text = text.to_lowercase();
-                let triggers = self.config.triggers();
-                debug!(
-                    "Checking message '{}' against triggers: {:?}",
-                    lower_text, triggers
-                );
-
-                let contains_trigger = triggers
-                    .iter()
-                    .any(|trigger| lower_text.contains(&trigger.to_lowercase()));
+                // Check for triggers - both @ commands and NLP triggers
+                let contains_trigger = self.check_message_triggers(&chat.guid, &text).await?;
 
                 debug!("Message contains trigger: {}", contains_trigger);
 
@@ -227,6 +218,92 @@ impl BotOrchestrator {
         }
 
         Ok(())
+    }
+
+    async fn check_message_triggers(&self, chat_guid: &str, text: &str) -> Result<bool> {
+        let lower_text = text.to_lowercase();
+
+        // Check for @ commands first (these always trigger)
+        let global_triggers = self.config.triggers();
+        debug!(
+            "Checking message '{}' against global triggers: {:?}",
+            lower_text, global_triggers
+        );
+
+        for trigger in &global_triggers {
+            if lower_text.contains(&trigger.to_lowercase()) {
+                debug!("Found global trigger: {}", trigger);
+                return Ok(true);
+            }
+        }
+
+        // Check for NLP trigger (chat-specific name)
+        let trigger_name = match self.database.get_chat_config(chat_guid).await {
+            Ok(Some(chat_config)) => {
+                debug!(
+                    "Found chat config for {}: trigger_name = {}",
+                    chat_guid, chat_config.trigger_name
+                );
+                chat_config.trigger_name.to_lowercase()
+            }
+            Ok(None) => {
+                debug!(
+                    "No chat config found for {}, using default trigger 'myai'",
+                    chat_guid
+                );
+                "myai".to_string()
+            }
+            Err(e) => {
+                debug!(
+                    "Failed to get chat config for {}: {}, using default trigger 'myai'",
+                    chat_guid, e
+                );
+                "myai".to_string()
+            }
+        };
+
+        debug!(
+            "Checking for NLP trigger '{}' in message '{}'",
+            trigger_name, lower_text
+        );
+
+        // NLP matching: check if the trigger name appears as a word (not substring)
+        if self.contains_trigger_word(&lower_text, &trigger_name) {
+            debug!("Found NLP trigger: {}", trigger_name);
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    fn contains_trigger_word(&self, text: &str, trigger: &str) -> bool {
+        // Convert both to lowercase for case-insensitive matching
+        let text_lower = text.to_lowercase();
+        let trigger_lower = trigger.to_lowercase();
+
+        // Simple word boundary matching
+        // Split text into words and check for exact match
+        let words: Vec<&str> = text_lower
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+            .collect();
+
+        debug!(
+            "Word analysis: text='{}' -> words={:?}, looking for trigger='{}'",
+            text_lower, words, trigger_lower
+        );
+
+        let found = words.iter().any(|&word| word == trigger_lower);
+        debug!("Trigger word found: {}", found);
+
+        // Also try simple contains as fallback
+        if !found {
+            let contains_fallback = text_lower.contains(&trigger_lower);
+            debug!("Fallback contains check: {}", contains_fallback);
+            return contains_fallback;
+        }
+
+        found
     }
 
     async fn ensure_chat_agent(&self, chat_guid: &str) -> Result<()> {
@@ -339,4 +416,3 @@ impl BotOrchestrator {
         Ok(())
     }
 }
-

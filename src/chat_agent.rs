@@ -45,6 +45,7 @@ impl ChatAgent {
                 chat_guid: chat_guid.clone(),
                 character_prompt: None,
                 triggers: global_config.triggers(),
+                trigger_name: "myai".to_string(),
                 use_ollama: false,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),

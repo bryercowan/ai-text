@@ -43,6 +43,7 @@ impl Database {
                 chat_guid TEXT PRIMARY KEY,
                 character_prompt TEXT,
                 triggers TEXT, -- JSON array
+                trigger_name TEXT DEFAULT 'myai',
                 use_ollama BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -94,12 +95,20 @@ impl Database {
         .await
         .context("Failed to create message_queue table")?;
 
+        // Migration: Add trigger_name column if it doesn't exist
+        sqlx::query(r#"
+            ALTER TABLE chat_configs ADD COLUMN trigger_name TEXT DEFAULT 'myai'
+        "#)
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
         Ok(())
     }
 
     pub async fn get_chat_config(&self, chat_guid: &str) -> Result<Option<ChatConfig>> {
         let row = sqlx::query(
-            "SELECT chat_guid, character_prompt, triggers, use_ollama, created_at, updated_at 
+            "SELECT chat_guid, character_prompt, triggers, trigger_name, use_ollama, created_at, updated_at 
              FROM chat_configs WHERE chat_guid = ?"
         )
         .bind(chat_guid)
@@ -116,6 +125,7 @@ impl Database {
                 chat_guid: row.get("chat_guid"),
                 character_prompt: row.get("character_prompt"),
                 triggers,
+                trigger_name: row.get("trigger_name"),
                 use_ollama: row.get("use_ollama"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
@@ -130,12 +140,13 @@ impl Database {
         
         sqlx::query(r#"
             INSERT OR REPLACE INTO chat_configs 
-            (chat_guid, character_prompt, triggers, use_ollama, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (chat_guid, character_prompt, triggers, trigger_name, use_ollama, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         "#)
         .bind(&config.chat_guid)
         .bind(&config.character_prompt)
         .bind(&triggers_json)
+        .bind(&config.trigger_name)
         .bind(config.use_ollama)
         .bind(config.created_at)
         .bind(Utc::now())

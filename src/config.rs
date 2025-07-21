@@ -40,6 +40,7 @@ impl Config {
             self.bot_trigger.to_lowercase(),
             "@character".to_string(),
             "@unhinge".to_string(),
+            "@name".to_string(),
         ]
     }
 }

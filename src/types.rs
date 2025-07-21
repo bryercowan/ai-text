@@ -43,6 +43,7 @@ pub struct ChatConfig {
     pub chat_guid: String,
     pub character_prompt: Option<String>,
     pub triggers: Vec<String>,
+    pub trigger_name: String, // NLP trigger name like "myai", "bot", "assistant"
     pub use_ollama: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

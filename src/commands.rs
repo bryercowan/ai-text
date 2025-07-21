@@ -10,11 +10,13 @@ use chrono::Utc;
 pub enum Command {
     Character { description: String },
     Unhinge { enabled: bool },
+    Name { trigger_name: String },
 }
 
 pub struct CommandParser {
     character_regex: Regex,
     unhinge_regex: Regex,
+    name_regex: Regex,
 }
 
 impl CommandParser {
@@ -22,6 +24,7 @@ impl CommandParser {
         Ok(Self {
             character_regex: Regex::new(r"@character\s+(.+)")?,
             unhinge_regex: Regex::new(r"@unhinge\s+(.+)")?,
+            name_regex: Regex::new(r"@name\s+(\w+)")?,
         })
     }
 
@@ -43,6 +46,15 @@ impl CommandParser {
             let enabled = value == "true" || value == "1" || value == "on" || value == "yes";
             debug!("Parsed unhinge command: {}", enabled);
             return Some(Command::Unhinge { enabled });
+        }
+
+        // Check for name command
+        if let Some(captures) = self.name_regex.captures(text) {
+            let trigger_name = captures.get(1)?.as_str().trim().to_lowercase();
+            if !trigger_name.is_empty() && trigger_name.chars().all(|c| c.is_alphanumeric()) {
+                debug!("Parsed name command: {}", trigger_name);
+                return Some(Command::Name { trigger_name });
+            }
         }
 
         None
@@ -77,6 +89,9 @@ impl CommandHandler {
                 }
                 Command::Unhinge { enabled } => {
                     self.handle_unhinge_command(chat_guid, enabled, config).await
+                }
+                Command::Name { trigger_name } => {
+                    self.handle_name_command(chat_guid, &trigger_name, config).await
                 }
             }
         } else {
@@ -152,6 +167,47 @@ impl CommandHandler {
             status
         )))
     }
+
+    async fn handle_name_command(
+        &self,
+        chat_guid: &str,
+        trigger_name: &str,
+        config: &mut ChatConfig,
+    ) -> Result<Option<String>> {
+        info!("Handling name command for chat {}: {}", chat_guid, trigger_name);
+
+        // Validate trigger name (alphanumeric only, 1-20 characters)
+        if trigger_name.len() > 20 || trigger_name.is_empty() {
+            return Ok(Some(format!(
+                "❌ Trigger name must be 1-20 characters long — MyAI"
+            )));
+        }
+
+        if !trigger_name.chars().all(|c| c.is_alphanumeric()) {
+            return Ok(Some(format!(
+                "❌ Trigger name must contain only letters and numbers — MyAI"
+            )));
+        }
+
+        let old_name = config.trigger_name.clone();
+        
+        // Update chat config
+        config.trigger_name = trigger_name.to_string();
+        config.updated_at = Utc::now();
+
+        // Save to database
+        if let Err(e) = self.database.save_chat_config(config).await {
+            return Ok(Some(format!(
+                "❌ Failed to save trigger name: {} — MyAI",
+                e
+            )));
+        }
+
+        Ok(Some(format!(
+            "✅ Trigger name changed from '{}' to '{}'. You can now say '{}, hello!' instead of using @ — MyAI",
+            old_name, trigger_name, trigger_name
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +238,28 @@ mod tests {
 
         let cmd = parser.parse_command("@unhinge on");
         assert!(matches!(cmd, Some(Command::Unhinge { enabled: true })));
+    }
+
+    #[test]
+    fn test_name_command_parsing() {
+        let parser = CommandParser::new().unwrap();
+
+        let cmd = parser.parse_command("@name bot");
+        assert!(matches!(cmd, Some(Command::Name { .. })));
+
+        if let Some(Command::Name { trigger_name }) = cmd {
+            assert_eq!(trigger_name, "bot");
+        }
+
+        let cmd = parser.parse_command("@name assistant123");
+        assert!(matches!(cmd, Some(Command::Name { .. })));
+
+        // Invalid names should not parse
+        let cmd = parser.parse_command("@name bot-name");
+        assert!(cmd.is_none());
+
+        let cmd = parser.parse_command("@name");
+        assert!(cmd.is_none());
     }
 
     #[test]
