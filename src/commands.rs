@@ -112,7 +112,7 @@ impl CommandHandler {
             Ok(prompt) => prompt,
             Err(e) => {
                 return Ok(Some(format!(
-                    "❌ Failed to generate character prompt: {} — MyAI",
+                    "❌ Failed to generate character prompt: {}",
                     e
                 )));
             }
@@ -127,7 +127,7 @@ impl CommandHandler {
         // Save to database
         if let Err(e) = self.database.save_chat_config(config).await {
             return Ok(Some(format!(
-                "❌ Failed to save character config: {} — MyAI",
+                "❌ Failed to save character config: {}",
                 e
             )));
         }
@@ -136,7 +136,7 @@ impl CommandHandler {
         // This will be handled by the caller
 
         Ok(Some(format!(
-            "✅ Character updated! I'm now: {} — MyAI",
+            "✅ Character updated! I'm now: {}",
             description
         )))
     }
@@ -156,14 +156,14 @@ impl CommandHandler {
         // Save to database
         if let Err(e) = self.database.save_chat_config(config).await {
             return Ok(Some(format!(
-                "❌ Failed to save unhinge config: {} — MyAI",
+                "❌ Failed to save unhinge config: {}",
                 e
             )));
         }
 
         let status = if enabled { "enabled" } else { "disabled" };
         Ok(Some(format!(
-            "✅ Unhinge mode {} — MyAI",
+            "✅ Unhinge mode {}",
             status
         )))
     }
@@ -179,13 +179,13 @@ impl CommandHandler {
         // Validate trigger name (alphanumeric only, 1-20 characters)
         if trigger_name.len() > 20 || trigger_name.is_empty() {
             return Ok(Some(format!(
-                "❌ Trigger name must be 1-20 characters long — MyAI"
+                "❌ Trigger name must be 1-20 characters long"
             )));
         }
 
         if !trigger_name.chars().all(|c| c.is_alphanumeric()) {
             return Ok(Some(format!(
-                "❌ Trigger name must contain only letters and numbers — MyAI"
+                "❌ Trigger name must contain only letters and numbers"
             )));
         }
 
@@ -198,13 +198,13 @@ impl CommandHandler {
         // Save to database
         if let Err(e) = self.database.save_chat_config(config).await {
             return Ok(Some(format!(
-                "❌ Failed to save trigger name: {} — MyAI",
+                "❌ Failed to save trigger name: {}",
                 e
             )));
         }
 
         Ok(Some(format!(
-            "✅ Trigger name changed from '{}' to '{}'. You can now say '{}, hello!' instead of using @ — MyAI",
+            "✅ Trigger name changed from '{}' to '{}'. You can now say '{}, hello!' instead of using @",
             old_name, trigger_name, trigger_name
         )))
     }

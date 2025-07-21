@@ -95,7 +95,7 @@ impl ChatAgent {
                         // Send error message to chat
                         if let Err(send_error) = self.bluebubbles.send_message(
                             &self.chat_guid,
-                            "❌ Error processing message. Please try again. — MyAI"
+                            "❌ Error processing message. Please try again."
                         ).await {
                             error!("Failed to send error message: {}", send_error);
                         }
@@ -173,7 +173,7 @@ impl ChatAgent {
                 if let Some(description) = args.get("description").and_then(|v| v.as_str()) {
                     match self.generate_and_send_image(description).await {
                         Ok(_) => {
-                            let response_text = "✅ Generated and sent a picture! — MyAI";
+                            let response_text = "✅ Generated and sent a picture!";
                             self.bluebubbles.send_message(&self.chat_guid, response_text).await?;
                             
                             let assistant_message = Message {
@@ -187,7 +187,7 @@ impl ChatAgent {
                         }
                         Err(e) => {
                             error!("Failed to generate image: {}", e);
-                            let error_text = "❌ Failed to generate image. Please try again. — MyAI";
+                            let error_text = "❌ Failed to generate image. Please try again.";
                             self.bluebubbles.send_message(&self.chat_guid, error_text).await?;
                             
                             let assistant_message = Message {
@@ -205,11 +205,7 @@ impl ChatAgent {
         }
 
         // Regular text response
-        let response_text = if ai_response.contains("— MyAI") {
-            ai_response
-        } else {
-            format!("{} — MyAI", ai_response)
-        };
+        let response_text = ai_response;
 
         self.bluebubbles.send_message(&self.chat_guid, &response_text).await?;
 
