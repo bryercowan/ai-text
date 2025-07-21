@@ -2,8 +2,9 @@ import axios from "axios";
 import OpenAI from "openai";
 import "dotenv/config";
 
+
 const OLLAMA_API = process.env.OLLAMA_API ?? "http://localhost:11434";
-const USE_OLLAMA = false;
+let USE_OLLAMA = false;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -13,9 +14,105 @@ const BB_API = process.env.BLUEBUBBLES_API ?? "http://localhost:12345";
 const BB_PASSWORD = process.env.BLUEBUBBLES_PASSWORD;
 const TRIGGER = (process.env.BOT_TRIGGER ?? "@ava").toLowerCase();
 
+// Array of all triggers that should queue messages for processing
+const TRIGGERS = [
+  TRIGGER,
+  "@character",
+  "@unhinge"
+];
+
 // Message processing queue
 const messageQueue = [];
 let isProcessingQueue = false;
+
+// Character contexts per chat
+const chatCharacters = new Map();
+
+async function generateCharacterPrompt(description) {
+  try {
+    const systemPrompt = `You are a prompt engineer. Generate a detailed system prompt for an AI character based on the user's description. The prompt should:
+1. Define the character's personality, mannerisms, and speaking style
+2. Include specific behavioral traits and quirks
+3. Be detailed enough to create a consistent character persona
+4. Start with "You are [character description]..."
+
+Keep it concise but comprehensive. Return only the system prompt, nothing else.`;
+
+    let completion;
+
+    if (USE_OLLAMA) {
+      const ollamaResponse = await axios.post(`${OLLAMA_API}/api/chat`, {
+        model: process.env.OLLAMA_MODEL ?? "llama3.2",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: description }
+        ],
+        stream: false
+      });
+      completion = ollamaResponse.data.message.content;
+    } else {
+      const openaiResponse = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: description }
+        ],
+        temperature: 0.7
+      });
+      completion = openaiResponse.choices[0].message.content;
+    }
+
+    return completion.trim();
+  } catch (error) {
+    console.error("Error generating character prompt:", error);
+    return `You are ${description}. Embody this character fully in your responses.`;
+  }
+}
+
+
+async function parseCommand(text, chatGuid, context) {
+  let command = false;
+  console.log("HIT0")
+  switch (true) {
+    case /@character\s+(.+)/i.test(text):
+      console.log("HIT")
+      const characterMatch = text.match(/@character\s+(.+)/i);
+      const description = characterMatch[1].trim();
+      console.log(`Character switch requested: ${description}`);
+
+      const characterPrompt = await generateCharacterPrompt(description);
+      console.log(`Generated character prompt: ${characterPrompt.substring(0, 100)}...`);
+
+      chatCharacters.set(chatGuid, characterPrompt);
+
+      context.length = 0;
+
+      await axios.post(`${BB_API}/api/v1/message/text?password=${BB_PASSWORD}`, {
+        chatGuid: chatGuid,
+        message: `✅ Character updated! I'm now: ${description} — MyAI`,
+        tempGuid: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      command = true;
+      break;
+
+    case /@unhinge\s+(.+)/i.test(text):
+      const [, val] = text.match(/@unhinge\s+(.+)/i);
+      const flag = val.trim().toLowerCase() === "true";
+      USE_OLLAMA = flag;
+      command = true;
+      break;
+
+    default:
+      break;
+  }
+  return command;
+
+}
+
 
 async function queueMessageProcessing(chatGuid, text, chatContexts) {
   messageQueue.push({ chatGuid, text, timestamp: Date.now(), chatContexts });
@@ -46,34 +143,41 @@ async function processMessageQueue() {
     try {
       console.log(`Processing message: ${text.substring(0, 50)}...`);
 
-      // Initialize context for this chat if it doesn't exist
       if (!chatContexts.has(chatGuid)) {
         chatContexts.set(chatGuid, []);
       }
 
       const context = chatContexts.get(chatGuid);
 
-      // Add current message to context
+
+      const isCommand = await parseCommand(text, chatGuid, context);
+      if (isCommand) {
+        continue;
+      }
+
       context.push({ role: "user", content: text });
 
-      // Keep only last 10 messages for context
       if (context.length > 10) {
         context.splice(0, context.length - 10);
       }
 
       let completion;
 
+      const characterPrompt = chatCharacters.get(chatGuid) ||
+        "You are MyAI, a casual assistant in a private friend group chat. Be brief and natural unless asked to elaborate. Match the group's tone and energy.";
+
       if (USE_OLLAMA) {
-        // Use Ollama for chat completion
         console.log(`Using Ollama model: ${process.env.OLLAMA_MODEL ?? "llama2-uncensored"}`);
         console.log(`Ollama API: ${OLLAMA_API}`);
+
+        const systemContent = characterPrompt + " If you want to generate and send a picture, just say [REQUEST_PICTURE] followed by your description.";
 
         const ollamaResponse = await axios.post(`${OLLAMA_API}/api/chat`, {
           model: process.env.OLLAMA_MODEL ?? "llama3.2",
           messages: [
             {
               role: "system",
-              content: "You are MyAI, a casual assistant in a private friend group chat. Be brief and natural unless asked to elaborate. Match the group's tone and energy. If you want to generate and send a picture, just say [REQUEST_PICTURE] followed by your description."
+              content: systemContent
             },
             ...context
           ],
@@ -91,7 +195,6 @@ async function processMessageQueue() {
           }]
         };
 
-        // Check if response contains picture request
         if (completion.choices[0].message.content.includes('[REQUEST_PICTURE]')) {
           const description = completion.choices[0].message.content.replace('[REQUEST_PICTURE]', '').trim();
           completion.choices[0].message.tool_calls = [{
@@ -102,13 +205,14 @@ async function processMessageQueue() {
           }];
         }
       } else {
-        // Use OpenAI
+        const systemContent = characterPrompt + " If you want to generate and send a picture or image, use the request_picture tool with a detailed description of what image you want to create.";
+
         completion = await openai.chat.completions.create({
-          model: "gpt-4.1",
+          model: "gpt-4o",
           messages: [
             {
               role: "system",
-              content: "You are MyAI, a casual assistant in a private friend group chat. Be brief and natural unless asked to elaborate. Match the group's tone and energy. If you want to generate and send a picture or image, use the request_picture tool with a detailed description of what image you want to create."
+              content: systemContent
             },
             ...context
           ],
@@ -137,7 +241,6 @@ async function processMessageQueue() {
       const response = completion.choices[0].message;
       let reply = response.content?.trim() || "";
 
-      // Handle tool calls for picture requests
       if (response.tool_calls) {
         for (const toolCall of response.tool_calls) {
           if (toolCall.function.name === "request_picture") {
@@ -152,10 +255,8 @@ async function processMessageQueue() {
         }
       }
 
-      // Add assistant response to context
       context.push({ role: "assistant", content: reply });
 
-      // Send the response
       await axios.post(`${BB_API}/api/v1/message/text?password=${BB_PASSWORD}`, {
         chatGuid: chatGuid,
         message: reply.includes("— MyAI") ? reply : `${reply} — MyAI`,
@@ -179,7 +280,6 @@ async function processMessageQueue() {
       });
     }
 
-    // Small delay between processing items
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 
@@ -272,7 +372,12 @@ async function pollMessages() {
           if (messageTime < startupTime) continue;
 
           const text = msg.text ?? "";
-          if (text.toLowerCase().includes(TRIGGER) && !processedMessages.has(msg.guid)) {
+          const lowerText = text.toLowerCase();
+          
+          // Check if message contains any of the triggers
+          const containsTrigger = TRIGGERS.some(trigger => lowerText.includes(trigger.toLowerCase()));
+          
+          if (containsTrigger && !processedMessages.has(msg.guid)) {
             processedMessages.add(msg.guid);
             console.log("[MyAI trigger]", text);
 
