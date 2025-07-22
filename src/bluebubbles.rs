@@ -3,7 +3,7 @@ use reqwest::{Client, multipart};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, error, info};
-use crate::types::{BlueBubblesChat, BlueBubblesMessage};
+use crate::types::{BlueBubblesChat, BlueBubblesMessage, BlueBubblesAttachment};
 
 #[derive(Debug, Clone, Serialize)]
 struct ChatQuery {
@@ -227,5 +227,53 @@ impl BlueBubblesClient {
 
         info!("Attachment sent successfully to chat {}", chat_guid);
         Ok(())
+    }
+
+    pub async fn download_attachment(&self, attachment: &BlueBubblesAttachment) -> Result<Vec<u8>> {
+        let url = format!("{}/api/v1/attachment/{}/download", self.base_url, attachment.guid);
+        let full_url = if let Some(password) = &self.password {
+            format!("{}?password={}", url, password)
+        } else {
+            url
+        };
+
+        debug!("Downloading attachment: {}", full_url);
+
+        let response = self.client
+            .get(&full_url)
+            .send()
+            .await
+            .context("Failed to download attachment")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            error!("Attachment download failed with status {}: {}", status, text);
+            return Err(anyhow::anyhow!("Attachment download failed: {}", text));
+        }
+
+        let attachment_bytes = response
+            .bytes()
+            .await
+            .context("Failed to read attachment bytes")?;
+
+        info!("Successfully downloaded attachment ({} bytes)", attachment_bytes.len());
+        Ok(attachment_bytes.to_vec())
+    }
+
+    pub fn is_image_attachment(&self, attachment: &BlueBubblesAttachment) -> bool {
+        if let Some(mime_type) = &attachment.mime_type {
+            mime_type.starts_with("image/")
+        } else if let Some(name) = &attachment.transfer_name {
+            let name_lower = name.to_lowercase();
+            name_lower.ends_with(".jpg") || 
+            name_lower.ends_with(".jpeg") || 
+            name_lower.ends_with(".png") || 
+            name_lower.ends_with(".gif") || 
+            name_lower.ends_with(".webp") ||
+            name_lower.ends_with(".heic")
+        } else {
+            false
+        }
     }
 }

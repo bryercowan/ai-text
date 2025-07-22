@@ -27,6 +27,20 @@ pub struct BlueBubblesMessage {
     pub date_delivered: Option<i64>,
     #[serde(rename = "isFromMe")]
     pub is_from_me: Option<bool>,
+    pub attachments: Option<Vec<BlueBubblesAttachment>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlueBubblesAttachment {
+    pub guid: String,
+    #[serde(rename = "originalROWID")]
+    pub original_rowid: Option<i64>,
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+    #[serde(rename = "transferName")]
+    pub transfer_name: Option<String>,
+    #[serde(rename = "totalBytes")]
+    pub total_bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

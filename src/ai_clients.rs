@@ -1,4 +1,5 @@
 use anyhow::{Result, Context};
+use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -9,7 +10,28 @@ use crate::types::{Message, MessageRole};
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenAIMessage {
     pub role: String,
-    pub content: String,
+    pub content: OpenAIContent,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum OpenAIContent {
+    Text(String),
+    Vision(Vec<OpenAIContentPart>),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenAIContentPart {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub text: Option<String>,
+    pub image_url: Option<OpenAIImageUrl>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OpenAIImageUrl {
+    pub url: String,
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,11 +156,12 @@ impl AIClients {
         system_prompt: &str,
         use_ollama: bool,
         include_image_tool: bool,
+        image_data: Option<Vec<u8>>,
     ) -> Result<String> {
         if use_ollama {
-            self.ollama_chat_completion(messages, system_prompt).await
+            self.ollama_chat_completion(messages, system_prompt, image_data).await
         } else {
-            self.openai_chat_completion(messages, system_prompt, include_image_tool).await
+            self.openai_chat_completion(messages, system_prompt, include_image_tool, image_data).await
         }
     }
 
@@ -160,9 +183,9 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
         ];
 
         let prompt = if self.openai_api_key.is_some() {
-            self.openai_chat_completion(&messages, system_prompt, false).await?
+            self.openai_chat_completion(&messages, system_prompt, false, None).await?
         } else {
-            self.ollama_chat_completion(&messages, system_prompt).await?
+            self.ollama_chat_completion(&messages, system_prompt, None).await?
         };
 
         Ok(prompt.trim().to_string())
@@ -173,6 +196,7 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
         messages: &[Message],
         system_prompt: &str,
         include_image_tool: bool,
+        image_data: Option<Vec<u8>>,
     ) -> Result<String> {
         let api_key = self.openai_api_key
             .as_ref()
@@ -181,11 +205,11 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
         let mut openai_messages = vec![
             OpenAIMessage {
                 role: "system".to_string(),
-                content: if include_image_tool {
+                content: OpenAIContent::Text(if include_image_tool {
                     format!("{} If you want to generate and send a picture or image, use the request_picture tool with a detailed description of what image you want to create.", system_prompt)
                 } else {
                     system_prompt.to_string()
-                }
+                })
             }
         ];
 
@@ -197,8 +221,34 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             };
             openai_messages.push(OpenAIMessage {
                 role: role.to_string(),
-                content: message.content.clone(),
+                content: OpenAIContent::Text(message.content.clone()),
             });
+        }
+
+        // Add image if provided
+        if let Some(image_bytes) = image_data {
+            let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+            let data_url = format!("data:image/jpeg;base64,{}", base64_image);
+            
+            let vision_message = OpenAIMessage {
+                role: "user".to_string(),
+                content: OpenAIContent::Vision(vec![
+                    OpenAIContentPart {
+                        content_type: "text".to_string(),
+                        text: Some("I've uploaded an image. Please analyze it.".to_string()),
+                        image_url: None,
+                    },
+                    OpenAIContentPart {
+                        content_type: "image_url".to_string(),
+                        text: None,
+                        image_url: Some(OpenAIImageUrl {
+                            url: data_url,
+                            detail: Some("high".to_string()),
+                        }),
+                    },
+                ]),
+            };
+            openai_messages.push(vision_message);
         }
 
         let mut request = OpenAIChatRequest {
@@ -267,11 +317,15 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
         }
     }
 
-    async fn ollama_chat_completion(&self, messages: &[Message], system_prompt: &str) -> Result<String> {
+    async fn ollama_chat_completion(&self, messages: &[Message], system_prompt: &str, image_data: Option<Vec<u8>>) -> Result<String> {
         let mut ollama_messages = vec![
             OllamaMessage {
                 role: "system".to_string(),
-                content: format!("{} If you want to generate and send a picture, just say [REQUEST_PICTURE] followed by your description.", system_prompt),
+                content: if image_data.is_some() {
+                    format!("{} If you want to generate and send a picture, just say [REQUEST_PICTURE] followed by your description. Note: An image was uploaded but Ollama vision support is limited.", system_prompt)
+                } else {
+                    format!("{} If you want to generate and send a picture, just say [REQUEST_PICTURE] followed by your description.", system_prompt)
+                },
             }
         ];
 

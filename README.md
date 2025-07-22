@@ -8,6 +8,7 @@ A powerful AI-powered iMessage bot built in Rust that integrates with BlueBubble
 - **🎭 Dynamic Characters**: AI-generated character personalities per chat
 - **🗣️ Natural Language Triggers**: Respond to "myai hello" instead of just "@myai"
 - **🎨 Image Generation**: DALL-E integration for creating and sending images
+- **👁️ Image Analysis**: GPT-4 Vision support for analyzing uploaded images
 - **⚡ Multi-Chat Support**: Independent agents for each conversation
 - **🔄 Async Message Queue**: Non-blocking message processing
 - **💾 Persistent Storage**: SQLite database for chat configs and history
@@ -106,7 +107,21 @@ Bot: ✅ Trigger name changed from 'myai' to 'bot'. You can now say 'bot, hello!
 
 You: bot generate me a sunset image
 Bot: ✅ Generated and sent a picture!
+
+You: *uploads a photo of a dog*
+You: myai what's in this image?
+Bot: I can see a beautiful golden retriever sitting in a park! The dog appears happy and is looking directly at the camera. There's green grass in the background and it looks like a lovely sunny day.
 ```
+
+### Image Analysis
+
+The bot automatically detects when you upload an image followed by a trigger message:
+
+1. **Upload an image** to the chat
+2. **Send a trigger message** like `myai analyze this` or `myai what do you see?`
+3. **The bot will analyze** the most recent image using GPT-4 Vision
+
+**Note**: Image analysis only works with OpenAI (not Ollama). The bot will automatically look back through recent messages to find images from users.
 
 ## 🏗️ Architecture
 

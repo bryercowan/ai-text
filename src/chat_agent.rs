@@ -160,8 +160,11 @@ impl ChatAgent {
 
         let context_messages: Vec<_> = self.context.iter().cloned().collect();
         
+        // Check for recent image from same user
+        let image_data = self.get_recent_user_image(&self.chat_guid).await;
+        
         let ai_response = self.ai_clients
-            .generate_chat_completion(&context_messages, system_prompt, self.config.use_ollama, true)
+            .generate_chat_completion(&context_messages, system_prompt, self.config.use_ollama, true, image_data)
             .await?;
 
         // Check if AI wants to generate an image
@@ -236,6 +239,51 @@ impl ChatAgent {
 
         info!("Successfully generated and sent image to chat {}", self.chat_guid);
         Ok(())
+    }
+
+    async fn get_recent_user_image(&self, chat_guid: &str) -> Option<Vec<u8>> {
+        // Look for the most recent message from a user (not from us) that has an image
+        // We'll fetch the last few messages to check for images
+        
+        debug!("Looking for recent user image in chat {}", chat_guid);
+        
+        // Use BlueBubbles to get recent messages with attachments
+        match self.bluebubbles.get_messages_after(chat_guid, None).await {
+            Ok(messages) => {
+                for message in messages.iter() {
+                    // Skip messages from the bot
+                    if message.is_from_me == Some(true) {
+                        continue;
+                    }
+                    
+                    // Check if message has image attachments
+                    if let Some(attachments) = &message.attachments {
+                        for attachment in attachments {
+                            if self.bluebubbles.is_image_attachment(attachment) {
+                                debug!("Found image attachment: {:?}", attachment.guid);
+                                
+                                // Download the image
+                                match self.bluebubbles.download_attachment(attachment).await {
+                                    Ok(image_data) => {
+                                        info!("Successfully downloaded image for vision processing ({} bytes)", image_data.len());
+                                        return Some(image_data);
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to download attachment {}: {}", attachment.guid, e);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch recent messages for image lookup: {}", e);
+            }
+        }
+        
+        None
     }
 }
 

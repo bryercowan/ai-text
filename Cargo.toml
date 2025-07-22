@@ -36,3 +36,6 @@ dashmap = "5.5"
 
 # Regex
 regex = "1.0"
+
+# Base64 encoding
+base64 = "0.21"
