@@ -112,6 +112,7 @@ pub struct ImageGenerationRequest {
     pub n: u32,
     pub size: String,
     pub quality: String,
+    pub response_format: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,7 +122,8 @@ pub struct ImageGenerationResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImageData {
-    pub url: String,
+    pub url: Option<String>,
+    pub b64_json: Option<String>,
 }
 
 #[derive(Clone)]
@@ -403,14 +405,15 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             .ok_or_else(|| anyhow::anyhow!("OpenAI API key required for image generation"))?;
 
         let request = ImageGenerationRequest {
-            model: "dall-e-3".to_string(),
+            model: "gpt-image-1".to_string(),
             prompt: description.to_string(),
             n: 1,
             size: "1024x1024".to_string(),
             quality: "standard".to_string(),
+            response_format: "b64_json".to_string(),
         };
 
-        debug!("Generating image with DALL-E: {}", description);
+        debug!("Generating image with gpt-image-1: {}", description);
 
         let response = self
             .http_client
@@ -434,29 +437,43 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             .await
             .context("Failed to parse image generation response")?;
 
-        let image_url = &image_response
+        let image_data = image_response
             .data
             .first()
-            .ok_or_else(|| anyhow::anyhow!("No image data in response"))?
-            .url;
+            .ok_or_else(|| anyhow::anyhow!("No image data in response"))?;
 
-        // Download the generated image
-        let image_response = self
-            .http_client
-            .get(image_url)
-            .send()
-            .await
-            .context("Failed to download generated image")?;
+        // Handle base64 response format
+        if let Some(b64_json) = &image_data.b64_json {
+            let image_bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64_json)
+                .context("Failed to decode base64 image data")?;
 
-        let image_bytes = image_response
-            .bytes()
-            .await
-            .context("Failed to read image bytes")?;
+            info!(
+                "Successfully generated image with gpt-image-1 ({} bytes)",
+                image_bytes.len()
+            );
+            Ok(image_bytes)
+        } else if let Some(image_url) = &image_data.url {
+            // Fallback to URL format if available
+            let image_response = self
+                .http_client
+                .get(image_url)
+                .send()
+                .await
+                .context("Failed to download generated image")?;
 
-        info!(
-            "Successfully generated and downloaded image ({} bytes)",
-            image_bytes.len()
-        );
-        Ok(image_bytes.to_vec())
+            let image_bytes = image_response
+                .bytes()
+                .await
+                .context("Failed to read image bytes")?;
+
+            info!(
+                "Successfully downloaded image from URL ({} bytes)",
+                image_bytes.len()
+            );
+            Ok(image_bytes.to_vec())
+        } else {
+            Err(anyhow::anyhow!("No image data found in response"))
+        }
     }
 }
