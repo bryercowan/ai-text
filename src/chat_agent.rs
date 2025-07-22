@@ -91,12 +91,16 @@ impl ChatAgent {
                 ChatAgentMessage::ProcessMessage(queued_message) => {
                     if let Err(e) = self.handle_message(queued_message).await {
                         error!("Error handling message in chat {}: {}", self.chat_guid, e);
-                        
+
                         // Send error message to chat
-                        if let Err(send_error) = self.bluebubbles.send_message(
-                            &self.chat_guid,
-                            "❌ Error processing message. Please try again."
-                        ).await {
+                        if let Err(send_error) = self
+                            .bluebubbles
+                            .send_message(
+                                &self.chat_guid,
+                                "❌ Error processing message. Please try again.",
+                            )
+                            .await
+                        {
                             error!("Failed to send error message: {}", send_error);
                         }
                     }
@@ -116,18 +120,21 @@ impl ChatAgent {
         debug!("Processing message in chat {}: {}", self.chat_guid, text);
 
         // Try to handle as a command first
-        if let Some(response) = self.command_handler
+        if let Some(response) = self
+            .command_handler
             .handle_command(&self.chat_guid, text, &mut self.config)
-            .await? 
+            .await?
         {
             // It was a command, send the response and clear context if needed
-            self.bluebubbles.send_message(&self.chat_guid, &response).await?;
-            
+            self.bluebubbles
+                .send_message(&self.chat_guid, &response)
+                .await?;
+
             // If it was a character command, clear the context
             if text.to_lowercase().starts_with("@character") {
                 self.context.clear();
             }
-            
+
             return Ok(());
         }
 
@@ -140,7 +147,7 @@ impl ChatAgent {
 
         // Add to context
         self.context.push_back(user_message.clone());
-        
+
         // Keep only last 10 messages
         while self.context.len() > 10 {
             self.context.pop_front();
@@ -148,9 +155,11 @@ impl ChatAgent {
 
         // Ensure chat config is saved first (for foreign key constraint)
         self.database.save_chat_config(&self.config).await?;
-        
+
         // Save user message to database
-        self.database.save_message(&self.chat_guid, &user_message).await?;
+        self.database
+            .save_message(&self.chat_guid, &user_message)
+            .await?;
 
         // Generate AI response
         let system_prompt = self.config.character_prompt
@@ -159,47 +168,62 @@ impl ChatAgent {
             .unwrap_or("You are MyAI, a casual assistant in a private friend group chat. Be brief and natural unless asked to elaborate. Match the group's tone and energy.");
 
         let context_messages: Vec<_> = self.context.iter().cloned().collect();
-        
+
         // Check for recent image from same user
         let image_data = self.get_recent_user_image(&self.chat_guid).await;
-        
-        let ai_response = self.ai_clients
-            .generate_chat_completion(&context_messages, system_prompt, self.config.use_ollama, true, image_data)
+
+        let ai_response = self
+            .ai_clients
+            .generate_chat_completion(
+                &context_messages,
+                system_prompt,
+                self.config.use_ollama,
+                true,
+                image_data,
+            )
             .await?;
 
         // Check if AI wants to generate an image
         if ai_response.starts_with("[TOOL_CALL:request_picture:") {
             let end_idx = ai_response.find(']').unwrap_or(ai_response.len());
             let args_json = &ai_response[27..end_idx]; // Skip "[TOOL_CALL:request_picture:"
-            
+
             if let Ok(args) = serde_json::from_str::<serde_json::Value>(args_json) {
                 if let Some(description) = args.get("description").and_then(|v| v.as_str()) {
                     match self.generate_and_send_image(description).await {
                         Ok(_) => {
                             let response_text = "✅ Generated and sent a picture!";
-                            self.bluebubbles.send_message(&self.chat_guid, response_text).await?;
-                            
+                            self.bluebubbles
+                                .send_message(&self.chat_guid, response_text)
+                                .await?;
+
                             let assistant_message = Message {
                                 role: MessageRole::Assistant,
                                 content: response_text.to_string(),
                                 timestamp: Utc::now(),
                             };
                             self.context.push_back(assistant_message.clone());
-                            self.database.save_message(&self.chat_guid, &assistant_message).await?;
+                            self.database
+                                .save_message(&self.chat_guid, &assistant_message)
+                                .await?;
                             return Ok(());
                         }
                         Err(e) => {
                             error!("Failed to generate image: {}", e);
                             let error_text = "❌ Failed to generate image. Please try again.";
-                            self.bluebubbles.send_message(&self.chat_guid, error_text).await?;
-                            
+                            self.bluebubbles
+                                .send_message(&self.chat_guid, error_text)
+                                .await?;
+
                             let assistant_message = Message {
                                 role: MessageRole::Assistant,
                                 content: error_text.to_string(),
                                 timestamp: Utc::now(),
                             };
                             self.context.push_back(assistant_message.clone());
-                            self.database.save_message(&self.chat_guid, &assistant_message).await?;
+                            self.database
+                                .save_message(&self.chat_guid, &assistant_message)
+                                .await?;
                             return Ok(());
                         }
                     }
@@ -210,7 +234,9 @@ impl ChatAgent {
         // Regular text response
         let response_text = ai_response;
 
-        self.bluebubbles.send_message(&self.chat_guid, &response_text).await?;
+        self.bluebubbles
+            .send_message(&self.chat_guid, &response_text)
+            .await?;
 
         // Add assistant response to context
         let assistant_message = Message {
@@ -220,14 +246,19 @@ impl ChatAgent {
         };
 
         self.context.push_back(assistant_message.clone());
-        self.database.save_message(&self.chat_guid, &assistant_message).await?;
+        self.database
+            .save_message(&self.chat_guid, &assistant_message)
+            .await?;
 
         debug!("Successfully processed message in chat {}", self.chat_guid);
         Ok(())
     }
 
     async fn generate_and_send_image(&self, description: &str) -> Result<()> {
-        info!("Generating image for chat {}: {}", self.chat_guid, description);
+        info!(
+            "Generating image for chat {}: {}",
+            self.chat_guid, description
+        );
 
         // Generate the image
         let image_data = self.ai_clients.generate_image(description).await?;
@@ -237,16 +268,19 @@ impl ChatAgent {
             .send_attachment(&self.chat_guid, image_data, "generated-image.png")
             .await?;
 
-        info!("Successfully generated and sent image to chat {}", self.chat_guid);
+        info!(
+            "Successfully generated and sent image to chat {}",
+            self.chat_guid
+        );
         Ok(())
     }
 
     async fn get_recent_user_image(&self, chat_guid: &str) -> Option<Vec<u8>> {
         // Look for the most recent message from a user (not from us) that has an image
         // We'll fetch the last few messages to check for images
-        
-        debug!("Looking for recent user image in chat {}", chat_guid);
-        
+
+        info!("Looking for recent user image in chat {}", chat_guid);
+
         // Use BlueBubbles to get recent messages with attachments
         match self.bluebubbles.get_messages_after(chat_guid, None).await {
             Ok(messages) => {
@@ -255,13 +289,13 @@ impl ChatAgent {
                     if message.is_from_me == Some(true) {
                         continue;
                     }
-                    
+
                     // Check if message has image attachments
                     if let Some(attachments) = &message.attachments {
                         for attachment in attachments {
                             if self.bluebubbles.is_image_attachment(attachment) {
-                                debug!("Found image attachment: {:?}", attachment.guid);
-                                
+                                info!("Found image attachment: {:?}", attachment.guid);
+
                                 // Download the image
                                 match self.bluebubbles.download_attachment(attachment).await {
                                     Ok(image_data) => {
@@ -269,7 +303,10 @@ impl ChatAgent {
                                         return Some(image_data);
                                     }
                                     Err(e) => {
-                                        error!("Failed to download attachment {}: {}", attachment.guid, e);
+                                        error!(
+                                            "Failed to download attachment {}: {}",
+                                            attachment.guid, e
+                                        );
                                         continue;
                                     }
                                 }
@@ -282,7 +319,7 @@ impl ChatAgent {
                 error!("Failed to fetch recent messages for image lookup: {}", e);
             }
         }
-        
+
         None
     }
 }
@@ -310,3 +347,4 @@ impl ChatAgentHandle {
         Ok(())
     }
 }
+
