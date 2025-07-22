@@ -276,28 +276,31 @@ impl ChatAgent {
     }
 
     async fn get_recent_user_image(&self, chat_guid: &str) -> Option<Vec<u8>> {
-        // Look for the most recent message from a user (not from us) that has an image
-        // We'll fetch the last few messages to check for images
+        // Look for an image in the most recent message from a user (not from us)
+        // Only check the very last user message to avoid analyzing old images
 
-        info!("Looking for recent user image in chat {}", chat_guid);
+        info!("Looking for image in most recent user message in chat {}", chat_guid);
 
-        // Use BlueBubbles to get recent messages with attachments
+        // Use BlueBubbles to get recent messages with attachments (limit to just a few)
         match self.bluebubbles.get_messages_after(chat_guid, None).await {
             Ok(messages) => {
                 info!("Found {} messages to check for images", messages.len());
+                
+                // Find the most recent message from a user (not the bot)
                 for (i, message) in messages.iter().enumerate() {
                     info!("Message {}: guid={}, is_from_me={:?}, has_attachments={}", 
                           i, message.guid, message.is_from_me, message.attachments.is_some());
+                    
                     // Skip messages from the bot
                     if message.is_from_me == Some(true) {
                         continue;
                     }
 
-                    // Check if message has image attachments
+                    // This is the most recent user message - check if it has an image
                     if let Some(attachments) = &message.attachments {
                         for attachment in attachments {
                             if self.bluebubbles.is_image_attachment(attachment) {
-                                info!("Found image attachment: {:?}", attachment.guid);
+                                info!("Found image attachment in most recent user message: {:?}", attachment.guid);
 
                                 // Download the image
                                 match self.bluebubbles.download_attachment(attachment).await {
@@ -316,6 +319,11 @@ impl ChatAgent {
                             }
                         }
                     }
+                    
+                    // We found the most recent user message but it has no images
+                    // Don't continue looking at older messages
+                    info!("Most recent user message has no images, not analyzing older messages");
+                    break;
                 }
             }
             Err(e) => {
