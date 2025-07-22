@@ -22,6 +22,8 @@ struct MessageQuery {
     sort: String,
     #[serde(rename = "after")]
     after: Option<u64>,
+    #[serde(rename = "with")]
+    with: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +126,7 @@ impl BlueBubblesClient {
             offset: 0,
             sort: "DESC".to_string(),
             after: after_timestamp,
+            with: vec!["attachment".to_string()],
         };
 
         match after_timestamp {

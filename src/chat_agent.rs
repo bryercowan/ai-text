@@ -284,7 +284,10 @@ impl ChatAgent {
         // Use BlueBubbles to get recent messages with attachments
         match self.bluebubbles.get_messages_after(chat_guid, None).await {
             Ok(messages) => {
-                for message in messages.iter() {
+                info!("Found {} messages to check for images", messages.len());
+                for (i, message) in messages.iter().enumerate() {
+                    info!("Message {}: guid={}, is_from_me={:?}, has_attachments={}", 
+                          i, message.guid, message.is_from_me, message.attachments.is_some());
                     // Skip messages from the bot
                     if message.is_from_me == Some(true) {
                         continue;
