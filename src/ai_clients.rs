@@ -6,13 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, error, info};
 
-// OpenAI API structures
-#[derive(Debug, Clone, Serialize)]
-pub struct OpenAIMessage {
-    pub role: String,
-    pub content: OpenAIContent,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum OpenAIContent {
@@ -21,11 +14,16 @@ pub enum OpenAIContent {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct OpenAIContentPart {
-    #[serde(rename = "type")]
-    pub content_type: String,
-    pub text: Option<String>,
-    pub image_url: Option<OpenAIImageUrl>,
+pub struct OpenAIMessage {
+    pub role: String,
+    pub content: Vec<OpenAIContentPart>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OpenAIContentPart {
+    Text { text: String },
+    ImageUrl { image_url: OpenAIImageUrl },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -206,11 +204,13 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
 
         let mut openai_messages = vec![OpenAIMessage {
             role: "system".to_string(),
-            content: OpenAIContent::Text(if include_image_tool {
-                format!("{} If you want to generate and send a picture or image, use the request_picture tool with a detailed description of what image you want to create.", system_prompt)
-            } else {
-                system_prompt.to_string()
-            }),
+            content: vec![OpenAIContentPart::Text {
+                text: if include_image_tool {
+                    format!("{} If you want to generate and send a picture or image, use the request_picture tool with a detailed description of what image you want to create.", system_prompt)
+                } else {
+                    system_prompt.to_string()
+                },
+            }],
         }];
 
         for message in messages {
@@ -221,7 +221,9 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             };
             openai_messages.push(OpenAIMessage {
                 role: role.to_string(),
-                content: OpenAIContent::Text(message.content.clone()),
+                content: vec![OpenAIContentPart::Text {
+                    text: message.content.clone(),
+                }],
             });
         }
 
@@ -235,18 +237,14 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             // Add a new user message specifically for image analysis
             openai_messages.push(OpenAIMessage {
                 role: "user".to_string(),
-                content: OpenAIContent::Vision(vec![
-                    OpenAIContentPart {
-                        content_type: "text".to_string(),
-                        text: Some("Analyze this image and describe what you see.".to_string()),
-                        image_url: None,
+                content: vec![
+                    OpenAIContentPart::Text {
+                        text: "what's in this image?".to_string(),
                     },
-                    OpenAIContentPart {
-                        content_type: "image_url".to_string(),
-                        text: None,
-                        image_url: Some(OpenAIImageUrl { url: data_url }),
+                    OpenAIContentPart::ImageUrl {
+                        image_url: OpenAIImageUrl { url: data_url },
                     },
-                ]),
+                ],
             });
         }
 
@@ -462,4 +460,3 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
         Ok(image_bytes.to_vec())
     }
 }
-
