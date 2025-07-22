@@ -225,17 +225,20 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
             });
         }
 
-        // Add image if provided
+        let has_image = image_data.is_some();
+        
+        // Add image if provided - create a separate user message with vision content
         if let Some(image_bytes) = image_data {
             let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
             let data_url = format!("data:image/jpeg;base64,{}", base64_image);
             
-            let vision_message = OpenAIMessage {
+            // Add a new user message specifically for image analysis
+            openai_messages.push(OpenAIMessage {
                 role: "user".to_string(),
                 content: OpenAIContent::Vision(vec![
                     OpenAIContentPart {
                         content_type: "text".to_string(),
-                        text: Some("I've uploaded an image. Please analyze it.".to_string()),
+                        text: Some("Analyze this image and describe what you see.".to_string()),
                         image_url: None,
                     },
                     OpenAIContentPart {
@@ -247,12 +250,17 @@ Keep it concise but comprehensive. Return only the system prompt, nothing else."
                         }),
                     },
                 ]),
-            };
-            openai_messages.push(vision_message);
+            });
         }
 
+        let model = if has_image {
+            "gpt-4o".to_string() // gpt-4o supports vision
+        } else {
+            "gpt-4o".to_string()
+        };
+
         let mut request = OpenAIChatRequest {
-            model: "gpt-4o".to_string(),
+            model,
             messages: openai_messages,
             temperature: 0.7,
             tools: None,
